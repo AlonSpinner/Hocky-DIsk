@@ -1,0 +1,3 @@
+gtsam
+symforce
+matplotlib
