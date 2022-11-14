@@ -216,13 +216,13 @@ def main():
             z_beacons, _ = h_beacons(x, beacons, beacons_cov)
 
             #estimation
-            x_hat, xcov_hat  = EKF_gps(x_hat_prev, xcov_hat_prev, DT, C, M, u_prev, z_gps, Q, gps_cov)
-            # x_hat, xcov_hat = EKF(x_hat_prev, xcov_hat_prev, DT, C, M, u_prev, z_gps, z_beacons, beacons, Q, R)
+            # x_hat, xcov_hat  = EKF_gps(x_hat_prev, xcov_hat_prev, DT, C, M, u_prev, z_gps, Q, gps_cov)
+            x_hat, xcov_hat = EKF(x_hat_prev, xcov_hat_prev, DT, C, M, u_prev, z_gps, z_beacons, beacons, Q, R)
             
             #lame estiamtion
             # phat = z_gps
-            # vhat = (phat - xhat_prev[[0,2]])/DT
-            # xhat = np.array([phat[0], vhat[0], phat[1], vhat[1]])
+            # vhat = (phat - x_hat_prev[[0,2]])/DT
+            # x_hat = np.array([phat[0], vhat[0], phat[1], vhat[1]])
             
             #GROUND TRUTH
             u = control(x_hat, goal)
