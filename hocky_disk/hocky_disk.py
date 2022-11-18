@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
+import control
 
 
 EPS = 1e-16
@@ -138,21 +139,6 @@ def EKF_gps(x_k, cov_k, dt, c, m, u, z_gps, R, Q):
     cov_kp1 = (np.eye(4) - K @ H) @ cov_pred
     return x_kp1, cov_kp1
 
-def control(x, goal):
-    '''
-    x is the state vector [x, vx, y, vy]
-    start is the starting point
-    goal is the goal point
-    '''
-    p = x[[0,2]]
-    v = x[[1,3]]
-    e = goal - p
-    de = -v
-    Kp = 5
-    Kd = 2
-    u = Kp * e + Kd * de
-    return u
-
 def x_cov_to_p_cov(cov):
     return [[cov[0,0], cov[0,2]], [cov[2,0], cov[2,2]]]
 
@@ -174,9 +160,16 @@ def plot_pos(pos, cov, nstd=3, ax : plt.Axes = None, facecolor = 'none',edgecolo
 
 
 def main():
+    #CONSTANTS FOR MOTION
     C = 1.0
     M = 1.0
     DT = 0.01
+
+    #TARGETS
+    start = np.array([1.0 ,1.0])
+    goal = np.array([5.0, 4.0])
+
+    #CONSTANTS FOR ESTIMATION
     gps_cov = 0.1 * np.eye(2)
     beacons_cov = np.diag([0.1, np.radians(3)])
     beacons = np.array([[10.0,5.0],
@@ -187,8 +180,21 @@ def main():
     R[2:,2:] = np.kron(np.eye(3), beacons_cov)
     Q = np.diag([0.001, 0.1, 0.001, 0.1])*0.1
 
-    start = np.array([1.0 ,1.0])
-    goal = np.array([5.0, 4.0])
+    #CONSTANTS FOR LQR CONTROL
+    Qlqr = np.eye(4) * 200
+    Rlqr = np.eye(2)
+    Ad = np.array([[1, DT, 0, 0],
+                    [0, 1, 0, 0],
+                    [0, 0, 1, DT],
+                    [0, 0, 0, 1]])
+    Bd = np.array([[0.5*DT**2, 0],
+                    [DT, 0],
+                    [0, 0.5*DT**2],
+                    [0, DT]])
+
+    #INITALIZATION FOR MPC
+    mpc = control.build_mpc(goal, Ad, Bd, DT)
+
 
     fig = plt.figure()
     ax = fig.add_subplot(111)
@@ -215,7 +221,7 @@ def main():
             z_gps, _ = h_gps(x, gps_cov)
             z_beacons, _ = h_beacons(x, beacons, beacons_cov)
 
-            #estimation
+            #ESTIMATION
             # x_hat, xcov_hat  = EKF_gps(x_hat_prev, xcov_hat_prev, DT, C, M, u_prev, z_gps, Q, gps_cov)
             x_hat, xcov_hat = EKF(x_hat_prev, xcov_hat_prev, DT, C, M, u_prev, z_gps, z_beacons, beacons, Q, R)
             
@@ -224,8 +230,12 @@ def main():
             # vhat = (phat - x_hat_prev[[0,2]])/DT
             # x_hat = np.array([phat[0], vhat[0], phat[1], vhat[1]])
             
+            #CONTROL
+            # u = control.pid_control(x_hat, goal)
+            # u = control.lqr_control(x_hat, goal, Ad, Bd, Qlqr, Rlqr)
+            u = control.mpc_control(mpc, x_hat)
+
             #GROUND TRUTH
-            u = control(x_hat, goal)
             x, _ = f(x, u, DT, C, M)
 
             #store for next iteration
