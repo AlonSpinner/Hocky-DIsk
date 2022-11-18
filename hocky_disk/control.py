@@ -18,8 +18,8 @@ def pid_control(x, goal):
     v = x[[1,3]]
     e = goal - p
     de = -v
-    Kp = 5
-    Kd = 2
+    Kp = 5*6
+    Kd = 2*4
     u = Kp * e + Kd * de
     return u
 
@@ -64,6 +64,8 @@ def dlqr(A, B, Q, R):
 def lqr_control(x, goal, A, B, Q, R):
     goal_full = np.array([goal[0],0.0,goal[1],0.0])
     K, _, _ = dlqr(A, B, Q, R)
+    # u = -K[:,[0,2]] @ (x[[0,2]]-goal) #this fails miserably
+    K = K * np.array([4,1,4,1]) #this is a hack to make it work
     u = -K @ (x - goal_full)
     return u
 
