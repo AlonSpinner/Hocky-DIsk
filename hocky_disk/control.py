@@ -1,8 +1,10 @@
 import numpy as np
-from numpy.matlib import repmat
 import do_mpc
 from casadi import *
 from casadi.tools import *
+import gtsam
+from typing import Optional, List
+from functools import partial
 
 #-------------------------------------------------------------------------------------------------------------
 #------------------------------------------------ PID CONTROL ------------------------------------------------
@@ -33,7 +35,7 @@ def solve_DARE(A, B, Q, R, maxiter=150, eps=0.01):
     """
     P = Q
 
-    for i in range(maxiter):
+    for _ in range(maxiter):
         Pn = A.T @ P @ A - A.T @ P @ B @ \
             np.linalg.inv(R + B.T @ P @ B) @ B.T @ P @ A + Q
         if (abs(Pn - P)).max() < eps:
@@ -89,7 +91,7 @@ def build_mpc(goal, A, B, DT):
     mpc = do_mpc.controller.MPC(model)
     setup_mpc = {
         'n_robust': 0,
-        'n_horizon': 100,
+        'n_horizon': 20,
         't_step': DT,
         'store_full_solution':False,
     }
@@ -107,3 +109,65 @@ def mpc_control(mpc,x0):
     mpc.x0 = x0
     mpc.set_initial_guess()
     return mpc.make_step(x0)
+
+#-------------------------------------------------------------------------------------------------------------
+#------------------------------------------------ Factor Graph -----------------------------------------------
+#-------------------------------------------------------------------------------------------------------------
+
+class factor_graph_control():
+    def __init__(self, goal, A, B, DT, R):
+        self.goal : np.ndarray = goal
+        self.A : np.ndarray = A
+        self.B : np.ndarray = B
+        self.DT : np.ndarray = DT
+        self.graph = gtsam.NonlinearFactorGraph()
+        self.initialEstimate = gtsam.Values()
+        self.isam = gtsam.ISAM2()
+        self.R = gtsam.noiseModel.Gaussian.Covariance(R)
+        self.t : int = 0 
+
+    def control(self, x0, u0, goal):
+        #motion factor
+        x_t = gtsam.symbol('x', self.t) 
+        x_tp1 = gtsam.symbol('x', self.t + 1)
+        u_t = gtsam.symbol('u', self.t)
+        
+        x_factor = gtsam.CustomFactor(self.R, [x_t, x_tp1, u_t], partial(error_x, self.A, self.B, self.DT))
+        y_factor = gtsam.CustomFactor(self.R, [x_tp1], partial(error_y, goal))
+        self.graph.push_back(x_factor)
+        self.graph.push_back(y_factor)
+
+        x_t_est = self.isam2.calculateEstimateV4(x_t)
+        x_tp1_est = self.A @ x_t_est + self.B @ u0
+        # self.initial_estimate.insert(X(self.i), initial_Xi)
+        #add factors
+        
+        #add initial values
+
+@staticmethod
+def error_y(goal: np.ndarray, this: gtsam.CustomFactor,
+              values: gtsam.Values,
+              jacobians: Optional[List[np.ndarray]]) -> float:
+    key = this.keys()[0]
+    x_estimate = values.atVector(key)
+    error = x_estimate[[0,2]] - goal
+    if jacobians is not None:
+        jacobians[0] = np.array([[1, 0, 0, 0],
+                                 [0 ,0, 1 ,0]])
+
+    return error
+
+@staticmethod
+def error_x(A, B, this: gtsam.CustomFactor,
+                values: gtsam.Values,
+                jacobians: Optional[List[np.ndarray]]) -> float:
+        x1_key = this.keys()[0]
+        x2_key = this.keys()[1]
+        u_key = this.keys()[2]
+        estimate_x2 = A * values.atVector(x1_key) + B * values.atVector(u_key)
+        error = estimate_x2 - values.atVector(x2_key)
+        if jacobians is not None:
+            jacobians[0] = A
+            jacobians[1] = np.linalg.inv(A)
+    
+        return error

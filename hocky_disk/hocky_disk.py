@@ -213,7 +213,7 @@ def main():
                 "u" : []}
     disk_plot = ax.scatter(x[0], x[2], marker='s', color='g')
     est_plot = plot_pos(x_hat[[0,2]], x_cov_to_p_cov(xcov_hat), ax = ax)
-    time_vec = np.arange(0, 2, DT)
+    time_vec = np.arange(0, 0.5, DT)
     
     with plt.ion():
         for t in time_vec:
@@ -232,8 +232,8 @@ def main():
             
             #CONTROL
             # u = control.pid_control(x_hat, goal)
-            u = control.lqr_control(x_hat, goal, Ad, Bd, Qlqr, Rlqr)
-            # u = control.mpc_control(mpc, x_hat)
+            # u = control.lqr_control(x_hat, goal, Ad, Bd, Qlqr, Rlqr)
+            u = control.mpc_control(mpc, x_hat)
 
             #GROUND TRUTH
             x, _ = f(x, u, DT, C, M)
