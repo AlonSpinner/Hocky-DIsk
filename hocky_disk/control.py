@@ -111,63 +111,124 @@ def mpc_control(mpc,x0):
     return mpc.make_step(x0)
 
 #-------------------------------------------------------------------------------------------------------------
+#------------------------------------------------ Factor Graph FULL-------------------------------------------
+#-------------------------------------------------------------------------------------------------------------
+class factor_graph_full_control():
+    def __init__(self, A, B, f_cov):
+        self.A : np.ndarray = A
+        self.B : np.ndarray = B
+        self.f_cov = gtsam.noiseModel.Gaussian.Covariance(f_cov)
+        self.h_cov = gtsam.noiseModel.Unit.Create(2) #unary factor
+        self.N = 20 #horzinon length
+    def make_step(self, x0, cov0, goal):
+        #define factors
+        graph = gtsam.NonlinearFactorGraph()
+        for t in range(self.N):
+            x_t = gtsam.symbol('x', t) 
+            x_tp1 = gtsam.symbol('x', t + 1)
+            u_t = gtsam.symbol('u', t)
+
+            f_factor = gtsam.CustomFactor(self.f_cov, [x_t, x_tp1, u_t], 
+                                            partial(error_f, self.A, self.B))
+            h_factor = gtsam.CustomFactor(self.h_cov, [x_tp1], 
+                                            partial(error_h, goal))
+            graph.push_back(f_factor)
+            graph.push_back(h_factor)
+        prior_factor = gtsam.CustomFactor(gtsam.noiseModel.Gaussian.Covariance(cov0),
+                                            [gtsam.symbol('x', 0)],
+                                            partial(error_prior, x0))
+        graph.push_back(prior_factor)
+
+        #define initial estimates
+        initial_estimate = gtsam.Values()
+        initial_estimate.insert(gtsam.symbol('x', 0), x0)
+        xt = x0
+        for t in range(self.N):
+            ut = pid_control(xt, goal)
+            xtp1 = self.A @ xt + self.B @ ut
+            initial_estimate.insert(gtsam.symbol('u', t), ut)
+            initial_estimate.insert(gtsam.symbol('x', t+1), xtp1)
+
+        #solve
+        params = gtsam.GaussNewtonParams()
+        optimizer = gtsam.GaussNewtonOptimizer(graph, initial_estimate, params)
+        # params = gtsam.LevenbergMarquardtParams()
+        # optimizer = gtsam.LevenbergMarquardtOptimizer(graph, initial_estimate, params)
+        result = optimizer.optimize()
+        return result.atVector(gtsam.symbol('u',0))
+
+
+#-------------------------------------------------------------------------------------------------------------
 #------------------------------------------------ Factor Graph -----------------------------------------------
 #-------------------------------------------------------------------------------------------------------------
 
-class factor_graph_control():
-    def __init__(self, goal, A, B, DT, R):
-        self.goal : np.ndarray = goal
-        self.A : np.ndarray = A
-        self.B : np.ndarray = B
-        self.DT : np.ndarray = DT
-        self.graph = gtsam.NonlinearFactorGraph()
-        self.initialEstimate = gtsam.Values()
-        self.isam = gtsam.ISAM2()
-        self.R = gtsam.noiseModel.Gaussian.Covariance(R)
-        self.t : int = 0 
+# class factor_graph_control():
+#     def __init__(self, goal, A, B, DT, R):
+#         self.goal : np.ndarray = goal
+#         self.A : np.ndarray = A
+#         self.B : np.ndarray = B
+#         self.DT : np.ndarray = DT
+#         self.graph = gtsam.NonlinearFactorGraph()
+#         self.initialEstimate = gtsam.Values()
+#         self.isam = gtsam.ISAM2()
+#         self.R = gtsam.noiseModel.Gaussian.Covariance(R)
+#         self.t : int = 0 
 
-    def control(self, x0, u0, goal):
-        #motion factor
-        x_t = gtsam.symbol('x', self.t) 
-        x_tp1 = gtsam.symbol('x', self.t + 1)
-        u_t = gtsam.symbol('u', self.t)
+#     def control(self, x0, u0, goal):
+#         #motion factor
+#         x_t = gtsam.symbol('x', self.t) 
+#         x_tp1 = gtsam.symbol('x', self.t + 1)
+#         u_t = gtsam.symbol('u', self.t)
         
-        x_factor = gtsam.CustomFactor(self.R, [x_t, x_tp1, u_t], partial(error_x, self.A, self.B, self.DT))
-        y_factor = gtsam.CustomFactor(self.R, [x_tp1], partial(error_y, goal))
-        self.graph.push_back(x_factor)
-        self.graph.push_back(y_factor)
+#         x_factor = gtsam.CustomFactor(self.R, [x_t, x_tp1, u_t], partial(error_x, self.A, self.B, self.DT))
+#         y_factor = gtsam.CustomFactor(self.R, [x_tp1], partial(error_y, goal))
+#         self.graph.push_back(x_factor)
+#         self.graph.push_back(y_factor)
 
-        x_t_est = self.isam2.calculateEstimateV4(x_t)
-        x_tp1_est = self.A @ x_t_est + self.B @ u0
-        # self.initial_estimate.insert(X(self.i), initial_Xi)
-        #add factors
+#         x_t_est = self.isam2.calculateEstimateV4(x_t)
+#         x_tp1_est = self.A @ x_t_est + self.B @ u0
         
-        #add initial values
+#         self.initial_estimate.insert(u_t, u0)
+#         self.initial_estimate.insert(x_tp1, x_tp1_est)
 
-@staticmethod
-def error_y(goal: np.ndarray, this: gtsam.CustomFactor,
+#         self.isam.update(self.graph, self.initial_estimate)
+
+#-------------------------------------------------------------------------------------------------------------
+#------------------------------------------------ CUSTOM FACTORS ---------------------------------------------
+#-------------------------------------------------------------------------------------------------------------
+def error_prior(x0, this: gtsam.CustomFactor,
               values: gtsam.Values,
               jacobians: Optional[List[np.ndarray]]) -> float:
     key = this.keys()[0]
     x_estimate = values.atVector(key)
-    error = x_estimate[[0,2]] - goal
+    error = -(x_estimate - x0)
+    if jacobians is not None:
+        jacobians[0] = np.eye(4)
+    return error
+
+def error_h(goal: np.ndarray, this: gtsam.CustomFactor,
+              values: gtsam.Values,
+              jacobians: Optional[List[np.ndarray]]) -> float:
+    key = this.keys()[0]
+    x_estimate = values.atVector(key)
+    error = -(x_estimate[[0,2]] - goal)
     if jacobians is not None:
         jacobians[0] = np.array([[1, 0, 0, 0],
                                  [0 ,0, 1 ,0]])
 
     return error
 
-@staticmethod
-def error_x(A, B, this: gtsam.CustomFactor,
+def error_f(A, B, this: gtsam.CustomFactor,
                 values: gtsam.Values,
                 jacobians: Optional[List[np.ndarray]]) -> float:
         x1_key = this.keys()[0]
         x2_key = this.keys()[1]
         u_key = this.keys()[2]
-        estimate_x2 = A * values.atVector(x1_key) + B * values.atVector(u_key)
-        error = estimate_x2 - values.atVector(x2_key)
+        estimate_x2 = A @ values.atVector(x1_key) + B @ values.atVector(u_key)
+        error = -(estimate_x2 - values.atVector(x2_key))
         if jacobians is not None:
             jacobians[0] = A
             jacobians[1] = np.linalg.inv(A)
+            jacobians[2] = B
     
         return error

@@ -195,6 +195,8 @@ def main():
     #INITALIZATION FOR MPC
     mpc = control.build_mpc(goal, Ad, Bd, DT)
 
+    #INITALIZATION FOR FACTOR GRAPH CONTROL (FULL)
+    fgc = control.factor_graph_full_control(Ad, Bd, Q)
 
     fig = plt.figure()
     ax = fig.add_subplot(111)
@@ -233,7 +235,8 @@ def main():
             #CONTROL
             # u = control.pid_control(x_hat, goal)
             # u = control.lqr_control(x_hat, goal, Ad, Bd, Qlqr, Rlqr)
-            u = control.mpc_control(mpc, x_hat)
+            # u = control.mpc_control(mpc, x_hat)
+            u = fgc.make_step(x_hat, xcov_hat ,goal)
 
             #GROUND TRUTH
             x, _ = f(x, u, DT, C, M)
