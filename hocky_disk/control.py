@@ -119,6 +119,7 @@ class factor_graph_full_control():
         self.B : np.ndarray = B
         self.f_cov = gtsam.noiseModel.Gaussian.Covariance(f_cov)
         self.h_cov = gtsam.noiseModel.Unit.Create(2) #unary factor
+        self.u_cov = gtsam.noiseModel.Unit.Create(1) #unary factor
         self.N = 20 #horzinon length
     def make_step(self, x0, cov0, goal):
         #define factors
@@ -132,8 +133,12 @@ class factor_graph_full_control():
                                             partial(error_f, self.A, self.B))
             h_factor = gtsam.CustomFactor(self.h_cov, [x_tp1], 
                                             partial(error_h, goal))
+            u_factor = gtsam.CustomFactor(self.u_cov, [u_t],
+                                            partial(error_u))
+
             graph.push_back(f_factor)
             graph.push_back(h_factor)
+            graph.push_back(u_factor)
         prior_factor = gtsam.CustomFactor(gtsam.noiseModel.Gaussian.Covariance(cov0),
                                             [gtsam.symbol('x', 0)],
                                             partial(error_prior, x0))
@@ -201,7 +206,7 @@ def error_prior(x0, this: gtsam.CustomFactor,
               jacobians: Optional[List[np.ndarray]]) -> float:
     key = this.keys()[0]
     x_estimate = values.atVector(key)
-    error = -(x_estimate - x0)
+    error =  x0 - x_estimate
     if jacobians is not None:
         jacobians[0] = np.eye(4)
     return error
@@ -211,7 +216,7 @@ def error_h(goal: np.ndarray, this: gtsam.CustomFactor,
               jacobians: Optional[List[np.ndarray]]) -> float:
     key = this.keys()[0]
     x_estimate = values.atVector(key)
-    error = -(x_estimate[[0,2]] - goal)
+    error = goal - x_estimate[[0,2]]
     if jacobians is not None:
         jacobians[0] = np.array([[1, 0, 0, 0],
                                  [0 ,0, 1 ,0]])
@@ -225,10 +230,49 @@ def error_f(A, B, this: gtsam.CustomFactor,
         x2_key = this.keys()[1]
         u_key = this.keys()[2]
         estimate_x2 = A @ values.atVector(x1_key) + B @ values.atVector(u_key)
-        error = -(estimate_x2 - values.atVector(x2_key))
+        error = values.atVector(x2_key) - estimate_x2
         if jacobians is not None:
             jacobians[0] = A
             jacobians[1] = np.linalg.inv(A)
             jacobians[2] = B
     
         return error
+
+def error_u(this: gtsam.CustomFactor,
+                values: gtsam.Values,
+                jacobians: Optional[List[np.ndarray]]) -> float:
+        u_key = this.keys()[0]
+        u_val = values.atVector(u_key)
+
+        error = np.array([u_val[0]**2 + u_val[1]**2])
+        if jacobians is not None:
+            jacobians[0] = 2 * u_val
+        return error
+
+        # u_val_x = u_val[0]
+        # if u_val_x > 1000.0:
+        #     error_x = (u_val_x-1000.0)**2
+        #     j_x = 2*(u_val_x-1000.0)
+        # elif u_val_x < 1000.0:
+        #     error_x = (u_val_x+1000.0)**2
+        #     j_x = 2*(u_val_x+1000.0)
+        # else:
+        #     error_x = 0
+        #     j_x = 0
+
+        # u_val_y = u_val[1]
+        # if u_val_y > 1000.0:
+        #     error_y = (u_val_y-1000.0)**2
+        #     j_y = 2*(u_val_y-1000.0)
+        # elif u_val_y < 1000.0:
+        #     error_y = (u_val_y+1000.0)**2
+        #     j_y = 2*(u_val_y+1000.0)
+        # else:
+        #     error_y = 0
+        #     j_y = 0
+
+        # error = np.array([error_x,error_y])
+        # if jacobians is not None:
+        #     jacobians[0] = np.array([[j_x, 0],
+        #                              [0, j_y]])
+        # return error
