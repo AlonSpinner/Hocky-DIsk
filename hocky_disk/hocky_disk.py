@@ -192,11 +192,16 @@ def main():
                     [0, 0.5*DT**2],
                     [0, DT]])
 
+
+    x_hat = x_hat_prev = x = np.array([start[0], 0.0, start[1], 0.0])
+    xcov_hat = xcov_hat_prev = np.diag([0.1, 0.001, 0.1, 0.001])
+    u_prev = np.zeros(2)
+
     #INITALIZATION FOR MPC
     mpc = control.build_mpc(goal, Ad, Bd, DT)
-
-    #INITALIZATION FOR FACTOR GRAPH CONTROL (FULL)
+    #INITALIZATION FOR FACTOR GRAPH CONTROL
     fgc = control.factor_graph_full_control(Ad, Bd, Q)
+    fgcinc = control.factor_graph_incremental_control(Ad, Bd, Q, x_hat, xcov_hat, goal)
 
     fig = plt.figure()
     ax = fig.add_subplot(111)
@@ -204,10 +209,6 @@ def main():
     ax.scatter(goal[0], goal[1], marker='o', color='r', s = 30)
     for b in beacons:
         ax.scatter(b[0], b[1], marker = 'd', color = 'b', s = 30)
-    
-    x_hat = x_hat_prev = x = np.array([start[0], 0.0, start[1], 0.0])
-    xcov_hat = xcov_hat_prev = np.diag([0.1, 0.001, 0.1, 0.001])
-    u_prev = np.zeros(2)
     
     history = {"x": [], 
                "x_hat" : [], "xcov_hat" : [], 
@@ -233,10 +234,11 @@ def main():
             # x_hat = np.array([phat[0], vhat[0], phat[1], vhat[1]])
             
             #CONTROL
-            # u = control.pid_control(x_hat, goal)
+            u = control.pid_control(x_hat, goal)
             # u = control.lqr_control(x_hat, goal, Ad, Bd, Qlqr, Rlqr)
             # u = control.mpc_control(mpc, x_hat)
-            u = fgc.make_step(x_hat, xcov_hat ,goal)
+            # u = fgc.make_step(x_hat, xcov_hat ,goal)
+            # u = fgcinc.make_step(x_hat, xcov_hat ,goal)
 
             #GROUND TRUTH
             x, _ = f(x, u, DT, C, M)

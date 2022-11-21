@@ -120,7 +120,7 @@ class factor_graph_full_control():
         self.f_cov = gtsam.noiseModel.Gaussian.Covariance(f_cov)
         self.h_cov = gtsam.noiseModel.Unit.Create(2) #unary factor
         self.u_cov = gtsam.noiseModel.Unit.Create(1) #unary factor
-        self.N = 20 #horzinon length
+        self.N = 60 #horzinon length
     def make_step(self, x0, cov0, goal):
         #define factors
         graph = gtsam.NonlinearFactorGraph()
@@ -167,37 +167,87 @@ class factor_graph_full_control():
 #------------------------------------------------ Factor Graph -----------------------------------------------
 #-------------------------------------------------------------------------------------------------------------
 
-# class factor_graph_control():
-#     def __init__(self, goal, A, B, DT, R):
-#         self.goal : np.ndarray = goal
-#         self.A : np.ndarray = A
-#         self.B : np.ndarray = B
-#         self.DT : np.ndarray = DT
-#         self.graph = gtsam.NonlinearFactorGraph()
-#         self.initialEstimate = gtsam.Values()
-#         self.isam = gtsam.ISAM2()
-#         self.R = gtsam.noiseModel.Gaussian.Covariance(R)
-#         self.t : int = 0 
+class factor_graph_incremental_control:
+    def __init__(self, A, B, f_cov, x0, cov0, goal):
+        self.A : np.ndarray = A
+        self.B : np.ndarray = B
+        self.f_cov = gtsam.noiseModel.Gaussian.Covariance(f_cov)
+        self.h_cov = gtsam.noiseModel.Unit.Create(2) #unary factor
+        self.u_cov = gtsam.noiseModel.Unit.Create(1) #unary factor
+        self.N = 60 #horzinon length
 
-#     def control(self, x0, u0, goal):
-#         #motion factor
-#         x_t = gtsam.symbol('x', self.t) 
-#         x_tp1 = gtsam.symbol('x', self.t + 1)
-#         u_t = gtsam.symbol('u', self.t)
+        self.graph = gtsam.NonlinearFactorGraph()
+        self.initial_estimate = gtsam.Values()
+        self.t = 0
+
+        params = gtsam.ISAM2Params()
+        params.setRelinearizeThreshold(0.01)
+        params.setRelinearizeSkip(1)
         
-#         x_factor = gtsam.CustomFactor(self.R, [x_t, x_tp1, u_t], partial(error_x, self.A, self.B, self.DT))
-#         y_factor = gtsam.CustomFactor(self.R, [x_tp1], partial(error_y, goal))
-#         self.graph.push_back(x_factor)
-#         self.graph.push_back(y_factor)
+        self.isam2 = gtsam.ISAM2(params)
 
-#         x_t_est = self.isam2.calculateEstimateV4(x_t)
-#         x_tp1_est = self.A @ x_t_est + self.B @ u0
-        
-#         self.initial_estimate.insert(u_t, u0)
-#         self.initial_estimate.insert(x_tp1, x_tp1_est)
+        #initalize system
+        for t in range(self.N):
+            x_t = gtsam.symbol('x', t) 
+            x_tp1 = gtsam.symbol('x', t + 1)
+            u_t = gtsam.symbol('u', t)
 
-#         self.isam.update(self.graph, self.initial_estimate)
+            f_factor = gtsam.CustomFactor(self.f_cov, [x_t, x_tp1, u_t], 
+                                            partial(error_f, self.A, self.B))
+            h_factor = gtsam.CustomFactor(self.h_cov, [x_tp1], 
+                                            partial(error_h, goal))
+            self.graph.push_back(f_factor)
+            self.graph.push_back(h_factor)
+        prior_factor = gtsam.CustomFactor(gtsam.noiseModel.Gaussian.Covariance(cov0),
+                                [gtsam.symbol('x', 0)],
+                                partial(error_prior, x0))
+        self.graph.push_back(prior_factor)
+        self.initial_estimate.insert(gtsam.symbol('x', 0), x0)
+        xt = x0
+        for t in range(self.N):
+            ut = pid_control(xt, goal)
+            xtp1 = self.A @ xt + self.B @ ut
+            self.initial_estimate.insert(gtsam.symbol('u', t), ut)
+            self.initial_estimate.insert(gtsam.symbol('x', t+1), xtp1)
+        self.isam2.update(self.graph, self.initial_estimate)
+        self.isam2.calculateBestEstimate()
+        self.initial_estimate.clear() 
 
+    def make_step(self, xt, covt, goal):
+            #define factors
+            tpN = self.t + self.N
+            x_tpN = gtsam.symbol('x', tpN) 
+            x_tpNp1 = gtsam.symbol('x', tpN + 1)
+            u_tpN = gtsam.symbol('u', tpN)
+
+            f_factor = gtsam.CustomFactor(self.f_cov, [x_tpN, x_tpNp1, u_tpN], 
+                                            partial(error_f, self.A, self.B))
+            h_factor = gtsam.CustomFactor(self.h_cov, [x_tpNp1], 
+                                            partial(error_h, goal))
+            self.graph.push_back(f_factor)
+            self.graph.push_back(h_factor)
+            
+            if self.t != 0:
+                prior_factor = gtsam.CustomFactor(gtsam.noiseModel.Gaussian.Covariance(covt),
+                                                    [gtsam.symbol('x', self.t)],
+                                                    partial(error_prior, xt))
+                self.graph.push_back(prior_factor)
+
+            #define initial estimates
+            xtpN = self.isam2.calculateEstimateVector(gtsam.symbol('x', tpN))
+            utpN = pid_control(xtpN, goal)
+            xtpNp1 = self.A @ xtpN + self.B @ utpN
+            self.initial_estimate.insert(gtsam.symbol('u', tpN), utpN)
+            self.initial_estimate.insert(gtsam.symbol('x', tpN+1), xtpNp1)
+
+            #solve
+            self.isam2.update(self.graph, self.initial_estimate)
+            self.isam2.calculateBestEstimate()
+            self.initial_estimate.clear() 
+   
+            #increment time
+            self.t += 1
+            return self.isam2.calculateEstimate(gtsam.symbol('u',self.t))
 #-------------------------------------------------------------------------------------------------------------
 #------------------------------------------------ CUSTOM FACTORS ---------------------------------------------
 #-------------------------------------------------------------------------------------------------------------
@@ -244,9 +294,10 @@ def error_u(this: gtsam.CustomFactor,
         u_key = this.keys()[0]
         u_val = values.atVector(u_key)
 
-        error = np.array([u_val[0]**2 + u_val[1]**2])
+        k = 1e-8
+        error = k * np.array([u_val[0]**2 + u_val[1]**2])
         if jacobians is not None:
-            jacobians[0] = 2 * u_val
+            jacobians[0] = np.reshape(k * 2 * u_val, (1,2))
         return error
 
         # u_val_x = u_val[0]
