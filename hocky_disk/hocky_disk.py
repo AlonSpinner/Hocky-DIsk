@@ -234,9 +234,9 @@ def main():
             # x_hat = np.array([phat[0], vhat[0], phat[1], vhat[1]])
             
             #CONTROL
-            u = control.pid_control(x_hat, goal)
+            # u = control.pid_control(x_hat, goal)
             # u = control.lqr_control(x_hat, goal, Ad, Bd, Qlqr, Rlqr)
-            # u = control.mpc_control(mpc, x_hat)
+            u = control.mpc_control(mpc, x_hat)
             # u = fgc.make_step(x_hat, xcov_hat ,goal)
             # u = fgcinc.make_step(x_hat, xcov_hat ,goal)
 
